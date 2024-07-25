@@ -4,15 +4,11 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 import numpy as np
-import faker as Faker
 import uuid
 from faker import Faker
 import matplotlib.pyplot as plt
-import plotly.express as px
-import plotly.graph_objs as go
-import queue
 from queue import PriorityQueue
-import itertools
+
 
 
 # Constants
@@ -24,9 +20,10 @@ NUM_ROOMS = 3
 discharged_patients = [] 
 summary_data = []
 patient_data = []
+total_patients_data = []
 
 patients_in_queue = 0
-num_patients_treated = 0
+num_patients_admitted = 0
 room_availability = "None"
 
 available_rooms = 0
@@ -52,7 +49,6 @@ total_wait_time_observation = 0
 total_patients_general = 0
 total_patients_surgery = 0
 total_patients_observation = 0
-
 
 prob_observation_after_general = 0.5
 prob_stay_general_after_general = 0.2
@@ -180,49 +176,37 @@ def simulate_staff_schedule(num_days, start_datetime):
     staff_month_schedule.to_csv('staff_month_schedules.csv', index=False)
     return staff_month_schedule
 
-class PatientAdmissions:
-    def __init__(self, env):
+
+
+class Hospital:
+    def __init__(self, env, num_general_rooms, num_observation_rooms, num_surgery_rooms, num_waiting_rooms, patients_in_queue):
         self.env = env
-        self.general_room = simpy.Resource(env, capacity=NUM_GENERAL_ROOMS) #Room A
-        self.observation_room = simpy.Resource(env,capacity=NUM_OBSERVATION_ROOMS) #Room B
-        self.surgery_room = simpy.Resource(env, capacity=NUM_SURGERY_ROOMS) #Room C
-        
-    def general_procedure(self, patient_id):
-        yield self.env.timeout(GENERAL_DURATION)
+        self.general_room = simpy.Resource(env, capacity=num_general_rooms)  # Room A
+        self.observation_room = simpy.Resource(env, capacity=num_observation_rooms)  # Room B
+        self.surgery_room =  simpy.Resource(env, capacity=num_surgery_rooms)  # Room C
+        self.waiting_room = simpy.Resource(env, capacity=10) 
+        self.patients_in_queue = patients_in_queue
+        # self.num_doctors = num_doctors
+        # self.num_nurse_observation = num_nurses_observation
+        # self.num_nurse_general = num_nurses_general
+        # self.num_nurses_surgery = num_nurses_surgery
 
-    def surgery_procedure(self, patient_id):
-        yield self.env.timeout(SURGERY_DURATION)
-    
-    def observation_procedure(self, patient_id):
-        yield self.env.timeout(OBSERVATION_DURATION)
+class Patient:
+    def __init__(self, env, patient_id, priority, procedure_type):
+        self.env = env
+        self.patient_id = patient_id
+        self.priority = priority
+        self.status = "waiting"
+        self.procedure_type = procedure_type
 
-
-def log_patient_data(patient_id, arrival_datetime, patient_status, room_type, procedure_type, treatment_start_time, treatment_end_time, wait_time, duration, log_type):
-    global patient_data
-    log_entry = {
-        'patient_id': patient_id,
-        'arrival_time': arrival_datetime.strftime('%Y-%m-%d %H:%M:%S'),
-        'patient_status': patient_status,
-        'room_type': room_type,
-        'procedure_type': procedure_type,
-        'treatment_start_time': treatment_start_time.strftime('%Y-%m-%d %H:%M:%S') if treatment_start_time != 'N/A' else 'N/A',
-        'treatment_end_time': treatment_end_time.strftime('%Y-%m-%d %H:%M:%S') if treatment_end_time != 'N/A' else 'N/A',
-        'wait_time': wait_time,
-        'duration': duration
-    }
-
-    if log_type == 'Priority 1' or log_type == 'Priority 2':
-        patient_data.append(log_entry)
-    elif log_type == 'discharge':
-        discharged_patients.append(log_entry)
+def patient(env, start_datetime, arrival_time_minutes, hospital):
     
-def patient_admissions(env, start_datetime, arrival_time_minutes, hospital):
+    global general_room_next_free, surgery_room_next_free, observation_room_next_free, patient_data, patient_id
     
-    global general_room_next_free, surgery_room_next_free, observation_room_next_free, patient_data, patients_in_queue, patient_id
+    global general_room_queue, observation_room_queue, surgery_room_queue, patient_data, discharged_patients
     
-    global general_room_queue, observation_room_queue, surgery_room_queue, patient_data, patient_id_gen, discharged_patients
-    
-    
+    procedure_type = random.choice(['general', 'observation', 'surgery'])
+    priority = random.choices(['Priority 1', 'Priority 2', 'discharge'], weights=[0.3, 0.4, 0.3], k=1)[0]
     patient_id = 0
 
     # Calculate the arrival datetime
@@ -231,247 +215,199 @@ def patient_admissions(env, start_datetime, arrival_time_minutes, hospital):
     
     delay = random.randint(30, 60)
     yield env.timeout(delay)
-    
     treatment_start_time = arrival_datetime + timedelta(minutes=delay)
-    wait_time = (treatment_start_time - arrival_datetime).total_seconds() / 60  # Calculate the wait time
-
-    patient_status = random.choices(['Priority 1', 'Priority 2', 'to discharge'], weights=[0.3, 0.4, 0.3], k=1)[0]
-
-    # Priority 1: direct to C (surgery)
-    # Priority 2:
-    # Priority 3:
-    # emergency Room A => Room C / Room C => B # Priority 1
-    # direct admission B (observation) => C (surgery) => back to room B #Priority 2
-    # planned/elective - Room A => Room B  #Priority 3
+    print("Hello patient")
+    patient_process = env.process(assign_room(env, hospital))
     
-    if patient_status == 'Priority 1':
-        general_room_queue.put((1, patient_id))  # Highest priority for surgery
-    elif patient_status == 'Priority 2':
-        general_room_queue.put((2, patient_id))  # Regular priority for general/observation
-    else:
-        discharged_patients.append(patient_id)  # Directly log to discharge patients
-        log_patient_data(patient_id, arrival_datetime, patient_status, 'None', 'None', arrival_datetime, 'N/A', 0, 0, log_type='discharge')
-        return 
+    env.run(until=patient_process)
+    duration, room_type = patient_process.value
+    print(duration, room_type)
+    print("Here")
     
-    procedure_type = random.choice(['general', 'observation', 'surgery'])
-    room_type = 'N/A'
-    
+    treatment_end_time = treatment_start_time + timedelta(minutes=duration)
 
-    if procedure_type == 'general':
-        room_type = 'Room A'
-        duration = GENERAL_DURATION
-        if env.now < general_room_next_free:
-            yield env.timeout(max(0, general_room_next_free - env.now))
-        general_room_next_free = env.now + duration
-        yield env.timeout(duration)
-    elif procedure_type == 'observation':
-        room_type = 'Room B'
-        if env.now < observation_room_next_free:
-            yield env.timeout(max(0, observation_room_next_free - env.now))
-        duration = OBSERVATION_DURATION
-        observation_room_next_free = env.now + duration
-        yield env.timeout(duration)
-    elif procedure_type == 'surgery':
+    hospital = Hospital(env, NUM_GENERAL_ROOMS, NUM_OBSERVATION_ROOMS, NUM_SURGERY_ROOMS, NUM_WAITING_ROOMS, patients_in_queue)
+
+    with hospital.waiting_room.request() as req:
+        yield req
+        patient_id +=1 
+        hospital.patients_in_queue += 1
+        wait_time = (treatment_start_time - arrival_datetime).total_seconds() / 60  # Calculate the wait time
+        print(f"{patient_id} enters waiting room at {env.now} after waiting {wait_time}")
         
-        room_type = 'Room C'
-        if env.now < surgery_room_next_free:
-            yield env.timeout(max(0, surgery_room_next_free - env.now))
-        duration = SURGERY_DURATION
-        surgery_room_next_free = env.now + duration
-    
-        yield env.timeout(duration)
-    
-    patient_id +=1 
-
-    # # Main patient process
-    # while True:
-    #     # General Room Assignment
-    #     if hospital.general_room.count < hospital.general_room.capacity and not general_room_queue.empty():
-    #         priority = general_room_queue.get()
-    #         patient_id, wait_time, duration = yield env.process(handle_patient(env, start_datetime, arrival_datetime, patient_id, hospital, patient_status, 'general', room_type, wait_time, duration))
-
-    #     # Observation Room Assignment
-    #     if hospital.observation_room.count < hospital.observation_room.capacity and not observation_room_queue.empty():
-    #         priority = observation_room_queue.get()
-    #         patient_id, wait_time, duration = yield env.process(handle_patient(env, start_datetime, arrival_datetime, patient_id, hospital, patient_status, 'observation', room_type, wait_time, duration))
-
-    #     # Surgery Room Assignment
-    #     if hospital.surgery_room.count < hospital.surgery_room.capacity and not surgery_room_queue.empty():
-    #         priority = surgery_room_queue.get()
-    #         patient_id, wait_time, duration = yield env.process(handle_patient(env, start_datetime, arrival_datetime, patient_id, hospital, patient_status, 'surgery', room_type, wait_time, duration))
-
-    #     yield env.timeout(random.randint(10, 20))  # Adjust arrival time interval
-        
-    yield env.process(handle_patient(env, start_datetime, arrival_datetime, patient_id, hospital, patient_status, procedure_type, room_type, wait_time, duration))
-
-        
-
-def handle_patient(env, start_datetime, arrival_datetime, patient_id, hospital, patient_status, procedure_type, room_type, wait_time, duration):
-
-        global general_room_next_free, surgery_room_next_free, observation_room_next_free
-
-        # Randomize delay between arrival and treatment start time (30 minutes to 1 hour)
-        delay = random.randint(30, 60)
-        yield env.timeout(delay)
-        treatment_start_time = arrival_datetime + timedelta(minutes=delay) 
-        
+        duration, room_type = yield env.process(assign_room(env, hospital))
         treatment_end_time = treatment_start_time + timedelta(minutes=duration)
+        
+        hospital.patients_in_queue -= 1
+        log_patient_data(patient_id, arrival_datetime, priority, room_type, procedure_type, treatment_start_time, treatment_end_time, wait_time, duration)
 
-        with getattr(hospital, f"{procedure_type}_room").request() as request:
-            yield request
-            print(f"{patient_id} starts {procedure_type} at {treatment_start_time}")
-            yield env.process(getattr(hospital, f"{procedure_type}_procedure")(patient_id))
-            print(f"{patient_id} finishes {procedure_type} at {treatment_end_time}")
-            
-            log_patient_data(patient_id, arrival_datetime, 'Priority 2', procedure_type, room_type, treatment_start_time, treatment_end_time, wait_time, duration, 'Priority 2')
+        if procedure_type == 'general':
+            rand_num = random.random()
+            if rand_num < prob_surgery_after_general:
+                procedure_type = 'surgery'
+                print(f'Patient arrived. Patients in queue: {hospital.patients_in_queue}')
+                log_total_patients(patients_in_queue)                
+                log_patient_data(patient_id, arrival_datetime, 'Priority 1', procedure_type, room_type, treatment_start_time, treatment_end_time, wait_time, duration)
+            elif rand_num < prob_surgery_after_general + prob_observation_after_general:
+                procedure_type = 'observation'
+                room_type = 'Room B'
+                print(f'Patient arrived. Patients in queue: {hospital.patients_in_queue}')
+                log_total_patients(patients_in_queue)
+                log_patient_data(patient_id, arrival_datetime, 'Priority 2', procedure_type, room_type, treatment_start_time, treatment_end_time, wait_time, duration)
+            elif rand_num < prob_surgery_after_general + prob_observation_after_general + prob_stay_general_after_general:
+                procedure_type = 'general'
+                room_type = 'Room A'
+                print(f'Patient arrived. Patients in queue: {hospital.patients_in_queue}')
+                log_total_patients(patients_in_queue)
+                log_patient_data(patient_id, arrival_datetime, 'Priority 3', procedure_type, room_type, treatment_start_time, treatment_end_time, wait_time, duration)
+            else:
+                # discharged_patients.append(patient_id)
+                # log_patient_data(patient_id, arrival_datetime, 'discharge', 'None', 'None', treatment_start_time, 'N/A', wait_time, 0)
+                return
 
-            # Determine next steps after each procedure
-            if procedure_type == 'general':
-                rand_num = random.random()
-                if rand_num < prob_surgery_after_general:
-                    surgery_room_queue.put((1, patient_id))  # Highest priority for surgery
-                    procedure_type = 'surgery'
-                    room_type = 'Room C'
-                    log_patient_data(patient_id, arrival_datetime, 'Priority 1', procedure_type, room_type, treatment_start_time, treatment_end_time, wait_time, duration, 'Priority 1')
-                elif rand_num < prob_surgery_after_general + prob_observation_after_general:
-                    observation_room_queue.put((2, patient_id))  # Priority for observation/testing
-                    procedure_type = 'observation'
-                    room_type = 'Room B'
-                elif rand_num < prob_surgery_after_general + prob_observation_after_general + prob_stay_general_after_general:
-                    general_room_queue.put((2, patient_id))  # Priority to stay in general room
-                else:
-                    log_patient_data(patient_id, arrival_datetime, 'to discharge', 'None', 'None', treatment_start_time, 'N/A', wait_time, 0, 'discharge')
+        elif procedure_type == 'observation':
+            if random.random() < prob_surgery_after_observation:
+                log_total_patients(patients_in_queue)
+                log_patient_data(patient_id, arrival_datetime, 'Priority 1', 'surgery', 'Room C', treatment_start_time, treatment_end_time, wait_time, duration)
+            else:
+                # discharged_patients.append(patient_id)
+                log_patient_data(patient_id, arrival_datetime, 'discharge', 'None', 'None', treatment_start_time, 'N/A', wait_time, 0)
+        elif procedure_type == 'surgery':
+            # discharged_patients.append(patient_id)
+            # log_patient_data(patient_id, arrival_datetime, priority, 'discharge', procedure_type, treatment_start_time, treatment_end_time, wait_time, duration)
+            return
+        
+    return patients_in_queue
 
-            elif procedure_type == 'observation':
-                # general_end_time = arrival_datetime + timedelta(minutes=delay + GENERAL_DURATION)
-                
-                # if treatment_start_time < general_end_time:
-                #     yield env.timeout((general_end_time - treatment_start_time).total_seconds() / 60)
-                #     treatment_start_time = general_end_time
+def assign_room(env, hospital):
+    duration = GENERAL_DURATION
+    room_type = 'N/A'
+    procedure_type = random.choice(['general', 'observation', 'surgery'])
 
-                if random.random() < prob_surgery_after_observation:
-                    surgery_room_queue.put((1, patient_id))  # Priority for immediate surgery
-                    log_patient_data(patient_id, arrival_datetime, 'Priority 1', 'surgery', 'Room C', treatment_start_time, treatment_end_time, wait_time, duration, 'Priority 1')
-                else:
-                    log_patient_data(patient_id, arrival_datetime, 'discharge', 'None', 'None', treatment_start_time, 'N/A', wait_time, 0, 'discharge')
-            
-            elif procedure_type == 'surgery':
-                # Ensure surgery starts after general screening ends
-                # general_end_time = arrival_datetime + timedelta(minutes=delay + GENERAL_DURATION)
-                # if treatment_start_time < general_end_time:
-                #     yield env.timeout((general_end_time - treatment_start_time).total_seconds() / 60)
-                #     treatment_start_time = general_end_time
-                log_patient_data(patient_id, arrival_datetime, patient_status, 'discharge', procedure_type, treatment_start_time, treatment_end_time, wait_time, duration, 'discharge')
+    hospital = Hospital(env, NUM_GENERAL_ROOMS, NUM_OBSERVATION_ROOMS, NUM_SURGERY_ROOMS, NUM_WAITING_ROOMS, patients_in_queue)
+    
+    if procedure_type == 'general':
+        room_resource = hospital.general_room
+        room_type = 'General Room'
+        next_free = general_room_next_free
+        next_free_update = lambda now: now + GENERAL_DURATION
+        next_free_var = 'general_room_next_free'
+    elif procedure_type == 'observation':
+        room_resource = hospital.observation_room
+        room_type = 'Observation Room'
+        duration = OBSERVATION_DURATION
+        next_free = observation_room_next_free
+        next_free_update = lambda now: now + OBSERVATION_DURATION
+        next_free_var = 'observation_room_next_free'
+    elif procedure_type == 'surgery':
+        room_resource = hospital.surgery_room
+        room_type = 'Surgery Room'
+        duration = SURGERY_DURATION
+        next_free = surgery_room_next_free
+        next_free_update = lambda now: now + SURGERY_DURATION
+        next_free_var = 'surgery_room_next_free'
+    
+    with room_resource.request() as request:
+        yield request
+        if env.now < next_free:
+            yield env.timeout(next_free - env.now)
+        setattr(hospital, next_free_var, next_free_update(env.now))
+    
+    return duration, room_type
+       
+def log_total_patients(patients_in_queue):
+    global total_patients_data
+    
+    log_entry = {
+        'patients_in_queue': patients_in_queue
+    }
+    total_patients_data.append(log_entry)
+    
+    total_patients_df = pd.DataFrame(total_patients_data)
+    # print(f'Logged patients in queue: {patients_in_queue}')
+    # print(total_patients_df)
 
-            return patient_id, wait_time, duration
+    return total_patients_df
+
+def log_patient_data(patient_id, arrival_datetime, priority, room_type, procedure_type, treatment_start_time, treatment_end_time, wait_time, duration):
+    global patient_data
+    log_entry = {
+        'patient_id': patient_id,
+        'arrival_time': arrival_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+        'priority': priority,
+        'room_type': room_type,
+        'procedure_type': procedure_type,
+        'treatment_start_time': treatment_start_time.strftime('%Y-%m-%d %H:%M:%S') if treatment_start_time != 'N/A' else 'N/A',
+        'treatment_end_time': treatment_end_time.strftime('%Y-%m-%d %H:%M:%S') if treatment_end_time != 'N/A' else 'N/A',
+        'wait_time': wait_time,
+        'duration': duration
+    }
+    patient_data.append(log_entry)
+    return patient_data
 
 def get_patients_df():
     global patient_data
     patient_df = pd.DataFrame(patient_data)
     return patient_df
 
+def get_summary_df():
+    global summary_data
+    summary_df = pd.DataFrame(summary_data)
+    return summary_df
+
 
 def simulate_hospital(sim_duration_days, start_datetime, time_slot_min):
-    global patient_data
+    global total_patients_data, patient_data, summary_data, num_patients_admitted, patients_in_queue, general_room_occupancy, observation_room_occupancy, surgery_room_occupancy, patients_df
     env = simpy.Environment()
     current_time = start_datetime
-    for day in range(sim_duration_days):
-        for time_slot in range(0, 24 * 60, time_slot_min):
-            arrival_time_minutes = (day * 24 * 60) + time_slot + random.randint(0, time_slot_min - 1)
-            for _ in range(random.randint(1, 5)):
-                hospital = PatientAdmissions(env)
-                env.process(patient_admissions(env, current_time, arrival_time_minutes, hospital))
-                current_time = start_datetime + timedelta(minutes=arrival_time_minutes)
-    env.run(until=sim_duration_days * 24 * 60)
-    # patients_df = get_patients_df()
-    # print("Patients DataFrame", patients_df)
-
-# Calculate averages    
-def calculate_averages():
-    global total_wait_time_general, total_wait_time_surgery, total_patients_general, total_patients_surgery
-    avg_wait_time_general = total_wait_time_general / total_patients_general if total_patients_general > 0 else 0
-    avg_wait_time_surgery = total_wait_time_surgery / total_patients_surgery if total_patients_surgery > 0 else 0
-    return avg_wait_time_general, avg_wait_time_surgery
-   
-
-def patient_arrivals(env, start_datetime, time_slot_min, sim_duration_days):
-    global patients_in_queue, total_wait_time_general, total_wait_time_surgery, patient_id
-    global total_patients_general, total_patients_surgery, summary_data
-    global general_room_next_free, surgery_room_next_free, general_room_occupancy, surgery_room_occupancy, observation_room_occupancy
-    global total_wait_time_observation, total_patients_observation, num_discharged
     
-    for day in range(sim_duration_days):
-        for time_slot in range(0, 24 * 60, time_slot_min):
-            num_new_patients_this_slot = 0
-            arrival_time_minutes = (day * 24 * 60) + time_slot + random.randint(0, time_slot_min - 1)
-            for _ in range(random.randint(1, 5)): # Adjust the range for random arrival count per slot
-                hospital = PatientAdmissions(env)
-                patient_admissions_result = yield env.process(patient_admissions(env, start_datetime, arrival_time_minutes, hospital))
-                priority, patient_id, wait_time, duration = patient_admissions_result
-                num_new_patients_this_slot += 1
-                
-                patients_in_queue += num_new_patients_this_slot   
+    hospital = Hospital(env, NUM_GENERAL_ROOMS, NUM_OBSERVATION_ROOMS, NUM_SURGERY_ROOMS, NUM_WAITING_ROOMS, patients_in_queue)
+    
+    while (current_time - start_datetime).days < sim_duration_days:
+    # for day in range(sim_duration_days):
+        # for time_slot in range(0, 24 * 60, time_slot_min):
+            # arrival_time_minutes = (day * 24 * 60) + time_slot + random.randint(0, time_slot_min - 1)
+        arrival_time_minutes = random.randint(0, time_slot_min * 24)
 
-                if duration == GENERAL_DURATION:
-                    total_wait_time_general += wait_time
-                    total_patients_general += 1
-                    general_queue_size = priority.qsize()
+        env.process(patient(env, current_time, arrival_time_minutes, hospital))     
+       
+        # total_patients_df = log_total_patients(patients_in_queue)
+        # patients_in_queue = total_patients_df['patients_in_queue'].iloc[-1]
+        # print("Total patients in queue", patients_in_queue)
 
-                    
-                elif duration == OBSERVATION_DURATION:
-                    total_wait_time_observation += wait_time
-                    total_patients_observation += 1
-                    observation_queue_size = priority.qsize()
-                    
-                elif duration == SURGERY_DURATION:
-                    total_wait_time_surgery += wait_time
-                    total_patients_surgery += 1
-                    surgery_queue_size = priority.qsize()
-                
-                elif duration == 0:
-                    num_discharged += 1
-                    
-                available_general_rooms = NUM_GENERAL_ROOMS - general_room_occupancy
-                available_observation_rooms = NUM_OBSERVATION_ROOMS - observation_room_occupancy
-                available_surgery_rooms = NUM_SURGERY_ROOMS - surgery_room_occupancy
-                
-                if env.now >= general_room_next_free and general_room_occupancy < NUM_GENERAL_ROOMS:
-                    general_room_occupancy += 1
-                    available_general_rooms -= 1
-                    if patients_in_queue > 0:
-                        patients_in_queue -= 1
-                        
-                if env.now >= observation_room_next_free and observation_room_occupancy < NUM_OBSERVATION_ROOMS:
-                    observation_room_occupancy += 1
-                    available_observation_rooms -= 1
-                    if patients_in_queue > 0:
-                        patients_in_queue -= 1
+        if env.now >= general_room_next_free and general_room_occupancy < NUM_GENERAL_ROOMS:
+            general_room_occupancy += 1
+            if patients_in_queue > 0:
+                patients_in_queue -= 1
 
-                if env.now >= surgery_room_next_free and surgery_room_occupancy < NUM_SURGERY_ROOMS:
-                    surgery_room_occupancy += 1
-                    available_surgery_rooms -= 1
-                    if patients_in_queue > 0:
-                        patients_in_queue -= 1
-                
-            
-                current_datetime = start_datetime + timedelta(minutes=arrival_time_minutes)
+        if env.now >= observation_room_next_free and observation_room_occupancy < NUM_OBSERVATION_ROOMS:
+            observation_room_occupancy += 1
+            if patients_in_queue > 0:
+                patients_in_queue -= 1
 
-                summary_data.append({
-                    'Date': current_datetime.strftime('%Y-%m-%d'),
-                    'Time Slot': current_datetime.strftime('%H:%M:%S'),
-                    'New Patients': num_new_patients_this_slot,
-                    'Patients in Queue': patients_in_queue,
-                    'Patients in Observation Room': observation_queue_size,
-                    'Patients in Surgery Room': surgery_queue_size,
-                    'Patients in General Room': general_queue_size
-                }, ignore_index=True)
+        if env.now >= surgery_room_next_free and surgery_room_occupancy < NUM_SURGERY_ROOMS:
+            surgery_room_occupancy += 1
+            if patients_in_queue > 0:
+                patients_in_queue -= 1
+        
+        current_time += timedelta(minutes=time_slot_min)
                 
-
-    return summary_data
-                         
-def get_summary_df():
-    patient_summary_df= pd.DataFrame(summary_data)
-    return patient_summary_df  
+        log_entry = {
+            'date': current_time.strftime('%Y-%m-%d'),
+            'time_slot': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'patients_in_queue': patients_in_queue
+            # 'patients_in_general_room': general_room_occupancy,
+            # 'patients_in_observation_room': observation_room_occupancy,
+            # 'patients_in_surgery_room': surgery_room_occupancy
+        }
+                
+        summary_data.append(log_entry)
+       
+    env.run(until=sim_duration_days * 24 * 60)
+    
+    summary_df = pd.DataFrame(summary_data)
+    return summary_df
+    
 
 # Streamlit UI
 st.title("Hospital Operations Scheduling Simulation")
@@ -490,6 +426,7 @@ OBSERVATION_DURATION =  st.sidebar.slider("Mean Duration of Testing/Observation 
 NUM_GENERAL_ROOMS = st.sidebar.slider("Number of General Rooms", min_value=1, max_value=10, value=2)
 NUM_SURGERY_ROOMS = st.sidebar.slider("Number of Surgery Rooms", min_value=1, max_value=10, value=2)
 NUM_OBSERVATION_ROOMS = st.sidebar.slider("Number of Observation Rooms", min_value=1, max_value=10, value=2)
+NUM_WAITING_ROOMS = 10
 
 sim_duration_days = st.sidebar.slider("Simulation Duration (Days)", min_value=1, max_value=31, value=7)
 
@@ -503,6 +440,8 @@ nurse_shifts = st.sidebar.slider("Nurse Shift (in hours)", min_value=7, max_valu
 # start_datetime = datetime.now()
 start_datetime = datetime(2024, 6, 1)
 
+
+# patient_arrivals(start_datetime, time_slot_min, sim_duration_days)
 simulate_hospital(sim_duration_days, start_datetime, time_slot_min)
 
 # Simulate button
@@ -510,51 +449,13 @@ if st.sidebar.button("Simulate"):
     staff_month_schedule = simulate_staff_schedule(sim_duration_days, start_datetime)
     st.write("Doctors/Nurses Staff Schedule:")
     st.write(staff_month_schedule)
-
-    # avg_wait_time_general, avg_wait_time_surgery = calculate_averages()
-
-    # st.write(f"Average Wait Time for General Checkup: {avg_wait_time_general:.2f} minutes")
-    # st.write(f"Average Wait Time for Surgery: {avg_wait_time_surgery:.2f} minutes")
-    
-    # Plot Average Wait Time for General Checkup and Surgery
-    # wait_times = {'General Checkup': avg_wait_time_general, 'Surgery': avg_wait_time_surgery}
-    # fig, ax = plt.subplots()
-    # ax.bar(wait_times.keys(), wait_times.values())
-    # ax.set_title('Average Wait Time')
-    # ax.set_ylabel('Minutes')
-    # st.pyplot(fig)
-    
-    st.write("Total Patients in Queue/Procedures Summary Schedule")
-    patients_summary_df = get_summary_df()
-    st.write(patients_summary_df)
     
     #Load patient data
     patients_df = get_patients_df()
     st.write("Patients Arrivals Table")
     st.write(patients_df)
 
-
-    # # Merge patient data with staff schedule based on procedure type
-    # merge_patients_staff_df = pd.merge(staff_month_schedule, patients_df, on='procedure_type', how='inner')
-
-    # # Calculate average wait time per doctor
-    # avg_wait_time_per_doctor = merge_patients_staff_df.groupby('doctor_name')['wait_time'].mean()
-    # st.write("Average Wait Time per Doctor:")
-    # st.write(avg_wait_time_per_doctor)
     
-    # # Plot Average Wait Time per Doctor
-    # fig, ax = plt.subplots()
-    # avg_wait_time_per_doctor.plot(kind='bar', ax=ax)
-    # ax.set_title('Average Wait Time per Doctor')
-    # ax.set_ylabel('Minutes')
-    # st.pyplot(fig)
-
-    
-
-
-    
-
-    
-   
-
-
+    summary_df = get_summary_df()
+    st.write("Total Patients in Queue/Procedures Summary Schedule")
+    st.write(summary_df)
