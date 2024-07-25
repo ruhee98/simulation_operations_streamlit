@@ -1,0 +1,21 @@
+scheduled_date,day,procedure_type,room_type,doctor_id,doctor_name,nurse_name(s),doctor_shift_hours,total_nurse_shift_hours
+2024-06-03,Monday,general,general,885b49a3-5c97-4d19-a3d8-c3c02ec85289,Dr. Denise Steele,"['Alan Anderson', 'Francisco Cummings']",5,16
+2024-06-03,Monday,surgery,surgery,885b49a3-5c97-4d19-a3d8-c3c02ec85289,Dr. Denise Steele,"['Ms. Michelle Rubio DDS', 'Dominic Jones', 'Cheryl Nelson', 'Alan Anderson']",5,32
+2024-06-03,Monday,observation,observation,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Cheryl Nelson', 'Dominic Jones', 'Catherine Mercado', 'Francisco Cummings']",5,32
+2024-06-03,Monday,none,none,885b49a3-5c97-4d19-a3d8-c3c02ec85289,Dr. Denise Steele,"['Michael Clarke', 'Roberta Meyers', 'Francisco Cummings', 'Alan Anderson']",5,32
+2024-06-04,Tuesday,general,general,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Roberta Meyers', 'Alan Anderson']",5,16
+2024-06-04,Tuesday,surgery,surgery,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Dominic Jones', 'Francisco Cummings', 'Casey Johnston', 'Mary Jones']",5,32
+2024-06-04,Tuesday,observation,observation,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Alan Anderson', 'Francisco Cummings', 'Mary Jones', 'Michael Clarke']",5,32
+2024-06-04,Tuesday,none,none,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Mary Jones', 'Alan Anderson', 'Francisco Cummings', 'Roberta Meyers']",5,32
+2024-06-05,Wednesday,general,general,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Roberta Meyers', 'Alan Anderson']",5,16
+2024-06-05,Wednesday,surgery,surgery,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Ms. Michelle Rubio DDS', 'Catherine Mercado', 'Alan Anderson', 'Cheryl Nelson']",5,32
+2024-06-05,Wednesday,observation,observation,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Catherine Mercado', 'Mary Jones', 'Roberta Meyers', 'Francisco Cummings']",5,32
+2024-06-05,Wednesday,none,none,885b49a3-5c97-4d19-a3d8-c3c02ec85289,Dr. Denise Steele,"['Roberta Meyers', 'Michael Clarke', 'Francisco Cummings', 'Catherine Mercado']",5,32
+2024-06-06,Thursday,general,general,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Cheryl Nelson', 'Francisco Cummings']",5,16
+2024-06-06,Thursday,surgery,surgery,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Casey Johnston', 'Catherine Mercado', 'Roberta Meyers', 'Ms. Michelle Rubio DDS']",5,32
+2024-06-06,Thursday,observation,observation,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Francisco Cummings', 'Alan Anderson', 'Michael Clarke', 'Dominic Jones']",5,32
+2024-06-06,Thursday,none,none,885b49a3-5c97-4d19-a3d8-c3c02ec85289,Dr. Denise Steele,"['Roberta Meyers', 'Francisco Cummings', 'Ms. Michelle Rubio DDS', 'Mary Jones']",5,32
+2024-06-07,Friday,general,general,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Michael Clarke', 'Mary Jones']",5,16
+2024-06-07,Friday,surgery,surgery,4cd02b9c-a37a-4d40-9812-b76647c1cd35,Dr. Anthony Marshall,"['Michael Clarke', 'Mary Jones', 'Francisco Cummings', 'Cheryl Nelson']",5,32
+2024-06-07,Friday,observation,observation,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Catherine Mercado', 'Mary Jones', 'Dominic Jones', 'Alan Anderson']",5,32
+2024-06-07,Friday,none,none,ab65c839-78e5-4ea7-9ff0-482d60ce11d0,Dr. Jorge Nelson,"['Catherine Mercado', 'Dominic Jones', 'Cheryl Nelson', 'Michael Clarke']",5,32
