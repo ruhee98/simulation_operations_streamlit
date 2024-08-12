@@ -7,9 +7,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
-
+import uuid
+from faker import Faker
 
 # Constants
+#Select number of doctors and nurses
+num_doctors = st.sidebar.slider("Number of Doctors", min_value=1, max_value=50, value=10)
+num_nurses_general = st.sidebar.slider("Number of Nurses (General)", min_value=1, max_value=20, value=10)
+num_nurses_surgery =st.sidebar.slider("Number of Nurses (Surgery)", min_value=2, max_value=20, value=10)
+num_nurses_observation  = st.sidebar.slider("Number of Nurses (Observation)", min_value=1, max_value=20, value=10)
+
 GENERAL_DURATION = st.sidebar.slider("Mean Duration of General Consultation", min_value=30, max_value=60, value=45)
 SURGERY_DURATION = st.sidebar.slider("Mean Duration of Surgery Procedure", min_value=0, max_value=120, value=90)
 OBSERVATION_DURATION = st.sidebar.slider("Mean Duration of Testing/Observation Procedure", min_value=0, max_value=90, value=60)
@@ -19,7 +26,7 @@ NUM_OBSERVATION_ROOMS = st.sidebar.slider("Number of Observation Rooms", min_val
 TIME_SLOT_MIN = st.sidebar.slider("Time Slot Intervals (in min)", min_value=0, max_value=60, value=15)
 SIM_DURATION_DAYS = st.sidebar.slider("Number of Days", min_value=0, max_value=31, value=7)
 
-start_treatment_datetime = datetime(2024, 7, 1, 0, 0)
+start_treatment_datetime = datetime.now()
 
 
 # Initialize environment and global variables
@@ -49,6 +56,130 @@ prob_discharge_after_general = 0.1
 prob_surgery_after_observation = 0.5
 prob_discharge_after_observation = 0.5
 
+# Initialize Faker
+fake = Faker()
+
+# Generate random date within simulation duration
+def random_date_within_sim_duration(start_date, duration_days):
+    delta_days = random.randint(0, duration_days - 1)
+    return start_date + timedelta(days=delta_days)
+
+def random_shift_times():
+    # Define shift hour ranges (start, end) with a minimum of 4 hours duration
+    shift_ranges = {
+        "early morning": (0, 4, 7, 12),   #Starts between 4-6AM, ends at 9AM-12PM
+        "morning": (7, 10, 11, 14),       # Start between 7-10 AM, end between 11 AM - 2 PM
+        "afternoon": (12, 14, 16, 18),    # Start between 12-2 PM, end between 4-6 PM
+        "evening": (17, 19, 21, 23),      # Start between 5-7 PM, end between 9-11 PM
+        "late_night": (20, 23, 0, 4)      # Start between 8-11 PM, end between 3-5 AM
+    }
+    
+    # Randomly select a shift type
+    shift_type = random.choice(list(shift_ranges.keys()))
+    
+    # Get the start and end hour ranges for the selected shift
+    start_hour_range = shift_ranges[shift_type][:2]
+    end_hour_range = shift_ranges[shift_type][2:]
+    
+    # Randomly select a start hour within the start range
+    start_hour = random.randint(start_hour_range[0], start_hour_range[1])
+    
+    # Calculate the earliest valid end hour (minimum 4 hours after start)
+    earliest_end_hour = (start_hour + 4) % 24  # Use modulo 24 to handle overflow
+    
+    # Adjust end_hour_range to prevent invalid selections
+    if earliest_end_hour > start_hour:
+        # Same day shift
+        latest_end_hour = min(end_hour_range[1], 23)
+    else:
+        # Shift crossing midnight
+        if end_hour_range[1] < earliest_end_hour:
+            latest_end_hour = end_hour_range[1] + 24
+        else:
+            latest_end_hour = end_hour_range[1]
+    
+    # Randomly select an end hour within the valid end range
+    if earliest_end_hour <= latest_end_hour:
+        end_hour = random.randint(earliest_end_hour, latest_end_hour) % 24
+    else:
+        # Handle crossing midnight with two possible ranges
+        if random.random() < 0.5:
+            end_hour = random.randint(earliest_end_hour, 23)
+        else:
+            end_hour = random.randint(0, latest_end_hour % 24)
+    
+    # Convert start_hour and end_hour to time format
+    shift_start_time = datetime.strptime(f"{start_hour:02d}:00", '%H:%M').time()
+    shift_end_time = datetime.strptime(f"{end_hour:02d}:00", '%H:%M').time()
+    
+    if end_hour < start_hour:
+        shift_end_time = (datetime.combine(datetime.today(), shift_end_time) + timedelta(days=1)).time()
+        
+    shifts = []
+    for shift_type, (start_min, start_max, end_min, end_max) in shift_ranges.items():
+        for start_hour in range(start_min, start_max + 1):
+            for end_hour in range(end_min, end_max + 1):
+                # Ensure end hour is at least 4 hours after start
+                if end_hour >= start_hour + 4:
+                    if shift_type == 'late_night' and end_hour < start_hour:
+                        end_hour += 24
+                    shifts.append((start_hour, end_hour, shift_type))
+    
+
+    return shift_start_time, shift_end_time
+
+def generate_schedule(num_doctors, num_nurses_general, num_nurses_surgery, num_nurses_observation, start_date, duration_days):
+    doctors = []
+    nurses = []
+    
+    procedure_types = ['General', 'Surgery', 'Observation']
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+    # Generate doctors
+    for doctor_id in range(1, num_doctors + 1):
+        doctor_name = fake.name()
+        procedure_type = random.choice(procedure_types)
+        # availability_date = random_date_within_sim_duration(start_date, duration_days)
+        for day in range(duration_days):
+            shift_start, shift_end = random_shift_times()
+            availability_date = start_date + timedelta(days=day)
+            if availability_date.strftime("%A") in weekdays:
+                doctors.append({
+                    'doctor_id': doctor_id,
+                    'doctor_name': doctor_name,
+                    'procedure_type': procedure_type,
+                    'availability_date': availability_date.strftime('%Y-%m-%d'),
+                    'day': availability_date.strftime("%A"),
+                    'shift_start': shift_start.strftime('%H:%M'),
+                    'shift_end': shift_end.strftime('%H:%M')
+                })
+    
+    # Generate nurses
+    for nurse_id in range(1, num_nurses_general + num_nurses_surgery + num_nurses_observation + 1):
+        nurse_name = fake.name()
+        if nurse_id <= num_nurses_general:
+            procedure_type = 'General'
+        elif nurse_id <= num_nurses_general + num_nurses_surgery:
+            procedure_type = 'Surgery'
+        else:
+            procedure_type = 'Observation'
+        
+        for day in range(duration_days):
+            shift_start, shift_end = random_shift_times()
+            # availability_date = random_date_within_sim_duration(start_date, duration_days)
+            availability_date = start_date + timedelta(days=day)
+            if availability_date.strftime("%A") in weekdays:
+                nurses.append({
+                    'nurse_id': nurse_id,
+                    'nurse_name': nurse_name,
+                    'procedure_type': procedure_type,
+                    'availability_date': availability_date.strftime('%Y-%m-%d'),
+                    'shift_start': shift_start.strftime('%H:%M'),
+                    'shift_end': shift_end.strftime('%H:%M')
+                })
+    
+    return doctors, nurses
+
 class Hospital:
     def __init__(self, env, num_general_rooms, num_observation_rooms, num_surgery_rooms):
         self.env = env
@@ -66,6 +197,8 @@ class Patient:
         self.wait_time = 0
         self.duration = 0
         self.next_procedure_type = None
+        self.assigned_doctor = None
+        self.assigned_nurses = []
 
     def set_priority(self):
         self.priority = random.choices(['Priority 1', 'Priority 2', 'Priority 3'], weights=[0.3, 0.5, 0.2], k=1)[0]
@@ -79,6 +212,31 @@ class Patient:
         else:
             self.procedure_type = 'Discharge'
         return self.procedure_type
+    
+def parse_time(time_str):
+    return datetime.strptime(time_str, '%Y-%m-%d %H:%M')
+
+# Function to find available medical staff
+def find_available_staff(arrival_time, procedure_type, doctors, nurses):
+    assigned_doctor = None
+    assigned_nurses = []
+
+    # Find available doctor
+    for doctor in doctors:
+        if (doctor['procedure_type'] == procedure_type and
+            doctor['availability_date'] == arrival_time.strftime('%Y-%m-%d') and
+            doctor['shift_start'] <= arrival_time.strftime('%H:%M') <= doctor['shift_end']):
+            assigned_doctor = doctor['doctor_name']
+            break
+
+    # Find available nurses
+    for nurse in nurses:
+        if (nurse['procedure_type'] == procedure_type and
+            nurse['availability_date'] == arrival_time.strftime('%Y-%m-%d') and
+            nurse['shift_start'] <= arrival_time.strftime('%H:%M') <= nurse['shift_end']):
+            assigned_nurses.append(nurse['nurse_name'])
+
+    return assigned_doctor, assigned_nurses
 
 def assign_room(env, arrival_datetime, hospital, patient):
     global patients_in_queue, last_treatment_end_time, patients_discharged, arrival_times, room_usages
@@ -102,6 +260,11 @@ def assign_room(env, arrival_datetime, hospital, patient):
         print(f"Patient {patient.patient_id} discharged. Patients in queue after decrement: {patients_in_queue}")
         print(f"Updated Counts: General Queue: {hospital.queue_counts['General']}, Observation Queue: {hospital.queue_counts['Observation']}, Surgery Queue: {hospital.queue_counts['Surgery']}, Discharge: {hospital.queue_counts['Discharge']}")
         return
+    
+    # Assign medical staff
+    assigned_doctor, assigned_nurses = find_available_staff(treatment_start_time, procedure_type, doctors, nurses)
+    patient.assigned_doctor = assigned_doctor
+    patient.assigned_nurses = assigned_nurses
 
     duration = GENERAL_DURATION if procedure_type == 'General' else OBSERVATION_DURATION if procedure_type == 'Observation' else SURGERY_DURATION
     patient.duration = duration
@@ -142,7 +305,7 @@ def assign_room(env, arrival_datetime, hospital, patient):
                 room_usage_type = procedure_type
                 room_usages[room_usage_type].append(room_usage_time)
     
-    log_patient_data(patient.patient_id, arrival_datetime, priority, procedure_type, treatment_start_time, treatment_end_time, wait_time, duration)
+    log_patient_data(patient.patient_id, arrival_datetime, priority, procedure_type, patient.assigned_doctor, patient.assigned_nurses, treatment_start_time, treatment_end_time, wait_time, duration)
     
     # Determine next procedure type
     if procedure_type == 'General':
@@ -168,13 +331,15 @@ def assign_room(env, arrival_datetime, hospital, patient):
     
     return patients_in_queue, hospital.queue_counts['General'], hospital.queue_counts['Observation'], hospital.queue_counts['Surgery'], arrival_times, room_usages
 
-def log_patient_data(patient_id, arrival_datetime, priority, procedure_type, treatment_start_time, treatment_end_time, wait_time, duration):
+def log_patient_data(patient_id, arrival_datetime, priority, procedure_type, assigned_doctor, assigned_nurse, treatment_start_time, treatment_end_time, wait_time, duration):
     global patient_data
     log_entry = {
         'patient_id': patient_id,
         'arrival_time': arrival_datetime.strftime('%Y-%m-%d %H:%M:%S'),
         'priority': priority,
         'procedure_type': procedure_type,
+        'assigned_doctor': assigned_doctor,
+        'assigned_nurse': assigned_nurse,
         'treatment_start_time': treatment_start_time.strftime('%Y-%m-%d %H:%M:%S'),
         'treatment_end_time': treatment_end_time.strftime('%Y-%m-%d %H:%M:%S'),
         'wait_time': wait_time,
@@ -400,15 +565,37 @@ def plot_heatmap(arrival_times_df):
                                 title=f'Heatmap of {room_type} Room Usage')
 
         st.plotly_chart(fig_usage)
-
     
 # Streamlit output
 # run_simulation()
 if st.sidebar.button("Run Simulation"):
-    summary_df, queue_lengths_df, arrival_times_df, room_usages_df = run_simulation()
+    st.title("Hospital Operations Scheduling Simulation")
     
+    doctors, nurses = generate_schedule(
+    num_doctors=num_doctors,
+    num_nurses_general=num_nurses_general,
+    num_nurses_surgery=num_nurses_surgery,
+    num_nurses_observation=num_nurses_observation,
+    start_date=start_treatment_datetime,
+    duration_days=SIM_DURATION_DAYS
+    )
+    
+    # shift_start_hour, shift_end_hour = random_shift_times()
+    # print(f"Randomly selected shift: Start at {shift_start_hour}:00, End at {shift_end_hour}:00")
+        
+    st.write("Doctors Weekday Schedule:")
+    st.dataframe(doctors)
+
+    st.write("Nurses Weekday Schedule:")
+    st.dataframe(nurses) 
+    
+    summary_df, queue_lengths_df, arrival_times_df, room_usages_df = run_simulation()
+
     patients_df = get_patients_df()
     st.write("Patients Arrivals Data", patients_df)
+    
+    summary_df = get_summary_df()
+    st.write("Total Patients in Queue in Time Slots - Summary Data", summary_df)
     
     plot_heatmap(arrival_times_df)
     
@@ -416,9 +603,7 @@ if st.sidebar.button("Run Simulation"):
         
     plot_transition_probabilities()
 
-    summary_df = get_summary_df()
-    st.write("Total Patients in Queue in Time Slots - Summary Data", summary_df)
-    
+  
     plot_queue_summary()
 
     summary_metrics_df = get_summary_metrics_df()
