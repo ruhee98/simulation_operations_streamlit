@@ -1,4 +1,3 @@
-streamlit==0.49.0
 simpy==4.0.1
 pandas==2.0.3
 streamlit==1.25.0
